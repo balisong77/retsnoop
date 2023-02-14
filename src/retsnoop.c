@@ -2272,7 +2272,11 @@ int main(int argc, char **argv)
 	}
 
 	ts1 = now_ns();
-	err = mass_attacher__attach(att);
+
+    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_entry, 0, "__tcp_transmit_skb");
+    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_exit, 1, "__tcp_transmit_skb");
+	
+    err = mass_attacher__attach(att);
 	if (err)
 		goto cleanup;
 	ts2 = now_ns();

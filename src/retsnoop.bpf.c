@@ -553,3 +553,13 @@ __hidden int handle_func_exit(void *ctx, u32 func_id, u64 func_ip, u64 ret)
 	pop_call_stack(ctx, func_id, func_ip, ret);
 	return 0;
 }
+
+SEC("kprobe/__tcp_transmit_skb")
+long __tcp_transmit_skb_entry(struct pt_regs *ctx){
+    return bpf_trace_printk("entry",6);
+}
+
+SEC("kretprobe/__tcp_transmit_skb")
+long __tcp_transmit_skb_exit(struct pt_regs *ctx){
+    return bpf_trace_printk("exit",5);
+}
