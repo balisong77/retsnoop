@@ -34,7 +34,14 @@ struct {
 	__type(key, __u32);
 	__type(value, struct call_stack);
 } stacks SEC(".maps");
-
+//------新变量------
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u32);
+    __type(value, struct flow_tuple);
+    __uint(max_entries, 4096);
+} pid_to_flow SEC(".maps");
+//------新变量------
 const volatile bool verbose = false;
 const volatile bool extra_verbose = false;
 const volatile bool use_ringbuf = false;
@@ -153,6 +160,9 @@ static __noinline bool push_call_stack(void *ctx, u32 id, u64 ip)
 
 	stack = bpf_map_lookup_elem(&stacks, &pid);
 	if (!stack) {
+        // bpf_trace_printk("stack_not_found",sizeof("stack_not_found"));
+        // bpf_trace_printk("%d",4,pid);
+        // bpf_trace_printk("...",4);
 		struct task_struct *tsk;
 
 		if (!(func_flags[id & MAX_FUNC_MASK] & FUNC_IS_ENTRY))
@@ -183,7 +193,7 @@ static __noinline bool push_call_stack(void *ctx, u32 id, u64 ip)
 			}
 		}
 	}
-
+    // bpf_trace_printk("stack_alreay_exist",sizeof("stack_alreay_exist"));
 	d = stack->depth;
 	barrier_var(d);
 	if (d >= MAX_FSTACK_DEPTH)
@@ -419,7 +429,23 @@ static __noinline bool pop_call_stack(void *ctx, u32 id, u64 ip, long res)
 		fe->func_id = id;
 		fe->func_lat = lat;
 		fe->func_res = res;
-
+        //--------测试------
+        struct flow_tuple flow_entity = {1,1,1,1};
+        struct flow_tuple *flow = bpf_map_lookup_elem(&pid_to_flow,&pid);
+        if(flow != NULL){
+            flow_entity.saddr = flow->saddr;
+            flow_entity.sport = flow->sport;
+            flow_entity.daddr = flow->daddr;
+            flow_entity.dport = flow->dport;
+        }
+        fe->flow_info = flow_entity;
+        // if(flow == NULL){
+        //     struct flow_tuple f = {1,1,1,1};
+        //     fe->flow_info = f;
+        // }else{
+        //     fe->flow_info = *flow;
+        // }
+        //--------测试------
 		bpf_ringbuf_submit(fe, 0);
 skip_ft_exit:;
 	}
@@ -556,10 +582,56 @@ __hidden int handle_func_exit(void *ctx, u32 func_id, u64 func_ip, u64 ret)
 
 SEC("kprobe/__tcp_transmit_skb")
 long __tcp_transmit_skb_entry(struct pt_regs *ctx){
-    return bpf_trace_printk("entry",6);
+    // bpf_trace_printk("mykprobe",sizeof("mykprobe"));
+    struct call_stack *stack;
+	u32 pid;
+    u64 d;
+    pid = (u32)bpf_get_current_pid_tgid();
+    stack = bpf_map_lookup_elem(&stacks, &pid);
+
+    if (!stack)
+        return false;
+
+    d = stack->depth;
+    // bpf_trace_printk("%d",4,d);
+    // bpf_trace_printk("!!!",4);
+
+    //添加map元素
+    struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
+    u16 family = ({ typeof(unsigned short) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_family); _val; });
+    if (family == 0x2) {
+        struct flow_tuple ftuple = {};
+
+        ftuple.saddr = ({ typeof(__be32) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_rcv_saddr); _val; });
+        ftuple.daddr = ({ typeof(__be32) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_daddr); _val; });
+        ftuple.sport = ({ typeof(__u16) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_num); _val; });
+        ftuple.dport = ({ typeof(__be16) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_dport); _val; });
+
+        bpf_map_update_elem(&pid_to_flow, &pid, &ftuple, BPF_ANY);
+        // bpf_printk("seccuss");
+    }
+    return 0;
 }
 
 SEC("kretprobe/__tcp_transmit_skb")
 long __tcp_transmit_skb_exit(struct pt_regs *ctx){
-    return bpf_trace_printk("exit",5);
+    // bpf_trace_printk("exit",5);
+    struct call_stack *stack;
+	u32 pid;
+    u64 d;
+    pid = (u32)bpf_get_current_pid_tgid();
+    stack = bpf_map_lookup_elem(&stacks, &pid);
+
+    if (!stack)
+        return false;
+
+    d = stack->depth;
+    // bpf_trace_printk("%d",4,d);
+    // bpf_trace_printk("###",4);
+    int is_success = 2;
+    if(d==1){
+        is_success = bpf_map_delete_elem(&pid_to_flow, &pid);
+    }
+    bpf_printk("%d",is_success);
+    return 0;
 }

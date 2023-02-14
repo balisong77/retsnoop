@@ -948,7 +948,7 @@ static int detect_linux_src_loc(const char *path)
 struct stack_item {
 	char marks[2]; /* spaces or '!' and/or '*' */
 
-	char dur[20];  /* duration, e.g. '11us' or '...' for incomplete stack */
+	char dur[20+30];  /* duration, e.g. '11us' or '...' for incomplete stack */
 	int dur_len;   /* number of characters used for duration output */
 
 	char err[24];  /* returned error, e.g., '-ENOENT' or '...' for incomplete stack */
@@ -1027,6 +1027,9 @@ struct func_trace_item {
 	int depth; /* 1-based, negative means exit from function */
 	int seq_id;
 	long func_res;
+    //------新变量------
+    struct flow_tuple flow_info;
+    //------新变量------
 };
 
 struct func_trace {
@@ -1128,6 +1131,7 @@ static int handle_func_trace_entry(struct ctx *ctx, const struct func_trace_entr
 	fti->seq_id = r->seq_id;
 	fti->func_lat = r->func_lat;
 	fti->func_res = r->func_res;
+    fti->flow_info = r->flow_info;
 
 	ft->cnt++;
 
@@ -1210,6 +1214,7 @@ static void prepare_ft_items(struct ctx *ctx, struct stack_items_cache *cache,
 
 		if (f->depth < 0) {
 			snappendf(s->dur, "%.3fus", f->func_lat / 1000.0);
+			snappendf(s->dur, "#%ld-%d-%ld-%d#",f->flow_info.saddr,f->flow_info.sport,f->flow_info.daddr,f->flow_info.dport);
 			prepare_func_res(s, f->func_res, ctx->skel->bss->func_flags[f->func_id]);
 		}
 	}
@@ -1251,7 +1256,7 @@ static void print_ft_items(struct ctx *ctx, const struct stack_items_cache *cach
 		printf("%-*s   %-*s  %*s\n",
 		       src_len, s->src,
 		       res_len, s->err,
-		       dur_len, s->dur);
+		       dur_len+30, s->dur);
 	}
 
 }

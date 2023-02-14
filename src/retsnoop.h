@@ -62,7 +62,14 @@ struct func_trace_start {
 	enum rec_type type;
 	int pid;
 };
-
+//------新变量------
+struct flow_tuple {
+    __u32 saddr;
+    __u32 daddr;
+    __u16 sport;
+    __u16 dport;
+};
+//------新变量------
 struct func_trace_entry {
 	/* REC_FUNC_TRACE_ENTRY or REC_FUNC_TRACE_EXIT */
 	enum rec_type type;
@@ -76,6 +83,9 @@ struct func_trace_entry {
 
 	long func_lat;
 	long func_res;
+    //------新变量------
+    struct flow_tuple flow_info;
+    //------新变量------
 };
 
 #define FUNC_IS_ENTRY 0x1
