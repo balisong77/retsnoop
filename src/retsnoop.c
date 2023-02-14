@@ -1388,6 +1388,7 @@ static void print_stack_items(const struct stack_items_cache *cache)
 		       dur_len, s->dur, err_len, s->err,
 		       sym_len, s->sym, src_len, s->src);
 	}
+    printf("-END-\n");
 }
 
 static void prepare_lbr_items(struct ctx *ctx, long addr, struct stack_items_cache *cache)
@@ -1500,7 +1501,7 @@ static int handle_call_stack(struct ctx *dctx, const struct call_stack *s)
 	const struct fstack_item *fitem;
 	const struct kstack_item *kitem;
 	int i, j, fstack_n, kstack_n;
-	char ts1[64], ts2[64];
+	char ts2[64];
 
 	if (!s->is_err && !env.emit_success_stacks) {
 		purge_func_trace(dctx, s->pid);
@@ -1534,10 +1535,11 @@ static int handle_call_stack(struct ctx *dctx, const struct call_stack *s)
 		printf("FSTACK (%d items):\n", fstack_n);
 		printf("KSTACK (%d items out of original %ld):\n", kstack_n, s->kstack_sz / 8);
 	}
-
-	ts_to_str(s->start_ts + ktime_off, ts1, sizeof(ts1));
+    char t11[256];
+    sprintf(t11, "%lld", s->start_ts + ktime_off);
+	// ts_to_str(s->start_ts + ktime_off, ts1, sizeof(ts1));
 	ts_to_str(s->emit_ts + ktime_off, ts2, sizeof(ts2));
-	printf("%s -> %s TID/PID %d/%d (%s/%s):\n", ts1, ts2, s->pid, s->tgid,  s->task_comm, s->proc_comm);
+	printf("%s -> %s TID/PID %d/%d (%s/%s):\n", t11, ts2, s->pid, s->tgid,  s->task_comm, s->proc_comm);
 
 	/* Emit more verbose outputs before more succinct and high signal output.
 	 * Func trace goes first, then LBR, then (error) stack trace, each
