@@ -1179,7 +1179,9 @@ static void prepare_ft_items(struct ctx *ctx, struct stack_items_cache *cache,
 		f = &ft->entries[i];
 		finfo = mass_attacher__func(ctx->att, f->func_id);
 		d = f->depth > 0 ? f->depth : -f->depth;
+        //缩进打印开关控制
 		sp = spaces + sizeof(spaces) - 1 - 4 * min(d - 1, 30);
+		// sp = "";
 
 		if (f->seq_id > last_seq_id + 1)
 			add_missing_records_msg(cache, f->seq_id - last_seq_id - 1);
@@ -1210,13 +1212,16 @@ static void prepare_ft_items(struct ctx *ctx, struct stack_items_cache *cache,
 		/* store function name and space indentation in src, as we
 		 * might need a bunch of extra space due to deep nestedness
 		 */
-		snappendf(s->src, "%s%s%s", sp, mark, finfo->name);
+		snappendf(s->src, "%s%s%s~%d~", sp, mark, finfo->name,d);
 
+        //depth < 0是函数退出时(kretprobe)，大于零是进入时(kprobe)
 		if (f->depth < 0) {
-			snappendf(s->dur, "%.3fus", f->func_lat / 1000.0);
-			snappendf(s->dur, "#%ld-%d-%ld-%d#",f->flow_info.saddr,f->flow_info.sport,f->flow_info.daddr,f->flow_info.dport);
+			snappendf(s->dur, "~%.3fus", f->func_lat / 1000.0);
+			snappendf(s->dur, "<=%d-%d-%d-%d#",f->flow_info.saddr,f->flow_info.sport,f->flow_info.daddr,f->flow_info.dport);
 			prepare_func_res(s, f->func_res, ctx->skel->bss->func_flags[f->func_id]);
-		}
+		}else if(f->depth > 0){
+            snappendf(s->dur, "=>%d-%d-%d-%d#",f->flow_info.saddr,f->flow_info.sport,f->flow_info.daddr,f->flow_info.dport);
+        }
 	}
 
 	if (cs->next_seq_id != last_seq_id + 1)
@@ -2278,12 +2283,15 @@ int main(int argc, char **argv)
 
 	ts1 = now_ns();
 
-    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_entry, 0, "__tcp_transmit_skb");
-    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_exit, 1, "__tcp_transmit_skb");
-	
     err = mass_attacher__attach(att);
 	if (err)
 		goto cleanup;
+
+    //自己的kprobe在retsnoop之后挂载，可以保证在其之前执行更新当前pid->flow绑定关系的操作
+    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_entry, 0, "__tcp_transmit_skb");
+    //自己的kretprobe在retsnoop之前挂载，可以保证在其之后执行清除当前pid->flow绑定关系的操作
+    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_exit, 1, "__tcp_transmit_skb");
+
 	ts2 = now_ns();
 	if (env.verbose)
 		printf("Successfully attached in %ld ms.\n", (long)((ts2 - ts1) / 1000000));
