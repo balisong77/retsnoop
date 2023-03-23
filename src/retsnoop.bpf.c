@@ -224,19 +224,23 @@ static __noinline bool push_call_stack(void *ctx, u32 id, u64 ip)
 	stack->func_lat[d] = bpf_ktime_get_ns();
 	stack->next_seq_id++;
 
+    //每有一个新的函数存入调用栈
 	if (emit_func_trace) {
         //--------测试------
         struct flow_tuple flow_entity = {1,1,1,1};
+        //查询当前线程对应的tcp_transmit_skb函数递归深度(每次递归产生的流信息不同)
         u64 *tcp_d_ptr = bpf_map_lookup_elem(&pid_to_tcp_depth,&pid);
         if(tcp_d_ptr == NULL){
             return -1;
         }
         u32 tcp_d = *tcp_d_ptr;
         // struct flow_tuple *flow = bpf_map_lookup_elem(&array_ptof.values[*tcp_d_ptr],&pid);
+        //根据深度拿到当前深度对应的 pid<->flow四元组 的map
         struct inner_map *pid_to_flow = bpf_map_lookup_elem(&array_ptof,&tcp_d);
         if(pid_to_flow == NULL){
             return -1;
         }
+        //查询该map，找到当前线程对应的流信息，即为当前函数调用栈所发送的流
         struct flow_tuple *flow = bpf_map_lookup_elem(pid_to_flow,&pid);
         if(flow != NULL){
             flow_entity.saddr = flow->saddr;
@@ -245,6 +249,7 @@ static __noinline bool push_call_stack(void *ctx, u32 id, u64 ip)
             flow_entity.dport = flow->dport;
         }
         //--------测试------
+        //将该函数需要打印的信息，封装成func_trace_entry(fe)，传送给用户态
 		struct func_trace_entry *fe;
 
 		fe = bpf_ringbuf_reserve(&rb, sizeof(*fe), 0);
@@ -622,28 +627,28 @@ __hidden int handle_func_exit(void *ctx, u32 func_id, u64 func_ip, u64 ret)
 	return 0;
 }
 
+// 在进入__tcp_transmit_skb时，更新当前线程的流四元组信息
 SEC("kprobe/__tcp_transmit_skb")
 long __tcp_transmit_skb_entry(struct pt_regs *ctx){
-    // bpf_printk("my_enter");
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u32 pid = (u32)pid_tgid;
     u32 tcp_d;
 
     struct sock *sk = (struct sock *)PT_REGS_PARM1(ctx);
     u16 family = ({ typeof(unsigned short) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_family); _val; });
-    //AF_INET == 0x2
+    //AF_INET == 0x2，判断是不是ip协议
     if(family != 0x2){
         return 0;
     }
 
-    //因为这个程序比retsnoop先进入__tcp_transmit_skb上的kprobe，当tcp_d_ptr为NULL时，说明是第一次进入调用栈
+    //因为这个kprobe比retsnoop的模板kprobe先进入__tcp_transmit_skb，当tcp_d_ptr为NULL时，说明是第一次进入调用栈
     u64 *tcp_d_ptr = bpf_map_lookup_elem(&pid_to_tcp_depth,&pid);
     if(tcp_d_ptr == NULL){
         tcp_d = 0;
     }else{
         tcp_d = *tcp_d_ptr + 1;
     }
-
+    //根据__tcp_transmit_skb函数的参数sk_buff来获取四元组信息
     struct flow_tuple ftuple = {};
     ftuple.saddr = ({ typeof(__be32) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_rcv_saddr); _val; });
     ftuple.daddr = ({ typeof(__be32) _val; __builtin_memset(&_val, 0, sizeof(_val)); bpf_probe_read(&_val, sizeof(_val), &sk->__sk_common.skc_daddr); _val; });
@@ -654,11 +659,13 @@ long __tcp_transmit_skb_entry(struct pt_regs *ctx){
     if(pid_to_flow == NULL){
         return -1;
     }
+    //更新 线程pid<->flow四元组 的map, 和 线程pid<->当前__tcp_transmit_skb函数递归深度 的map
     bpf_map_update_elem(pid_to_flow, &pid, &ftuple, BPF_ANY);
     bpf_map_update_elem(&pid_to_tcp_depth, &pid, &tcp_d, BPF_ANY);
     return 0;
 }
 
+// 退出__tcp_transmit_skb时，说明发包完毕，删除线程对应流信息
 SEC("kretprobe/__tcp_transmit_skb")
 long __tcp_transmit_skb_exit(struct pt_regs *ctx){
     // bpf_printk("my_exit");
