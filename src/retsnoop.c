@@ -2288,9 +2288,9 @@ int main(int argc, char **argv)
 		goto cleanup;
 
     //自己的kprobe在retsnoop之后挂载，可以保证在其之前执行更新当前pid->flow绑定关系的操作
-    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_entry, 0, "__tcp_transmit_skb");
+    bpf_program__attach_kprobe(skel->progs.mptcp_sendmsg_entry, 0, "mptcp_sendmsg");
     //自己的kretprobe在retsnoop之前挂载，可以保证在其之后执行清除当前pid->flow绑定关系的操作
-    bpf_program__attach_kprobe(skel->progs.__tcp_transmit_skb_exit, 1, "__tcp_transmit_skb");
+    bpf_program__attach_kprobe(skel->progs.mptcp_sendmsg_exit, 1, "mptcp_sendmsg");
 
 	ts2 = now_ns();
 	if (env.verbose)
